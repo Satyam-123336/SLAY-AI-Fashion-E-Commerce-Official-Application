@@ -1,0 +1,183 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=Playfair+Display:ital,wght@1,500;1,600;1,700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+:root {
+  /* Typography */
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Outfit", sans-serif;
+  --font-serif: "Playfair Display", serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Colors (from DESIGN.md) */
+  --color-surface: #fdf8f8;
+  --color-background: #fdf8f8;
+  --color-on-background: #1c1b1b;
+  --color-on-surface: #1c1b1b;
+  --color-primary: #000000; /* Deep Obsidian */
+  --color-primary-contrast: #ffffff;
+  --color-secondary: #4b41e1; /* Electric Indigo */
+  --color-muted-platinum: #e5e7eb; /* Muted Platinum */
+  --color-outline: #747878;
+  --color-soft-alabaster: #f9fafb;
+  --color-deep-obsidian: #111111;
+  --color-electric-indigo: #4f46e5;
+  --color-muted-platinum: #e5e7eb;
+
+  /* Radii */
+  --radius-sm: 0.125rem;
+  --radius-default: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+
+  /* Typographic sizes */
+  --type-display-lg: 64px;
+  --type-headline-xl: 40px;
+  --type-headline-xl-mobile: 32px;
+  --type-headline-md: 24px;
+  --type-body-lg: 18px;
+  --type-body-md: 16px;
+  --type-label-sm: 12px;
+
+  /* Spacing */
+  --space-unit: 4px;
+  --container-max: 1440px;
+  --gutter: 24px;
+  --margin-desktop: 64px;
+  --margin-mobile: 20px;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-on-background);
+  font-family: var(--font-sans);
+}
+
+/* Small helper classes to bridge existing Tailwind usage to design tokens */
+.font-display { font-family: var(--font-display); }
+.font-serif { font-family: var(--font-serif); }
+.font-body-md { font-size: var(--type-body-md); }
+.font-headline-md { font-size: var(--type-headline-md); font-weight: 700; letter-spacing: -0.01em; }
+.text-primary { color: var(--color-primary); }
+.text-on-background { color: var(--color-on-background); }
+.bg-primary { background-color: var(--color-primary); color: var(--color-primary-contrast); }
+.text-on-primary { color: var(--color-primary-contrast); }
+.bg-surface { background-color: var(--color-surface); }
+.bg-surface-bright { background-color: var(--color-surface); }
+.border-outline { border-color: var(--color-outline); }
+.border-outline-variant { border-color: color-mix(in srgb, var(--color-outline) 30%, transparent); }
+.rounded-default { border-radius: var(--radius-default); }
+.font-label-sm { font-size: var(--type-label-sm); font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
+
+/* Helpers replacing bracketed utilities used in components */
+.max-w-app { max-width: 420px; }
+
+@media (min-width: 768px) {
+  .max-w-app {
+    zoom: 0.82;
+  }
+}
+.h-card-310 { height: 310px; }
+.w-94p { width: 94%; }
+.max-w-150 { max-width: 150px; }
+
+/* Focus styles for accessibility */
+button:focus-visible,
+.accessory-tile:focus-visible,
+a:focus-visible {
+  outline: 3px solid rgba(75, 65, 225, 0.18); /* subtle indigo focus */
+  outline-offset: 2px;
+}
+
+.accessory-tile:focus {
+  box-shadow: 0 0 0 3px rgba(75, 65, 225, 0.12);
+}
+
+/* Additional token-based helpers */
+.text-secondary { color: var(--color-electric-indigo); }
+.bg-secondary-container { background-color: color-mix(in srgb, var(--color-electric-indigo) 8%, white); }
+.bg-surface-container-highest { background-color: var(--color-surface-container-highest, #ffffff); }
+.border-muted { border-color: var(--color-muted-platinum); }
+.text-muted { color: #6b7280; }
+.text-on-surface-variant { color: var(--color-on-surface-variant, #444748); }
+.bg-soft-alabaster { background-color: var(--color-soft-alabaster); }
+
+/* Typographic helpers */
+.text-display-lg { font-size: var(--type-display-lg); font-weight: 700; letter-spacing: -0.04em; }
+.text-headline-xl { font-size: var(--type-headline-xl); font-weight: 700; letter-spacing: -0.02em; }
+.text-headline-xl-mobile { font-size: var(--type-headline-xl-mobile); font-weight: 700; letter-spacing: -0.02em; }
+.text-headline-md { font-size: var(--type-headline-md); font-weight: 600; letter-spacing: -0.01em; }
+.text-body-lg { font-size: var(--type-body-lg); }
+.text-body-md { font-size: var(--type-body-md); }
+.font-body-lg { font-size: var(--type-body-lg); }
+
+@media (min-width: 768px) {
+  .text-headline-xl-mobile { font-size: var(--type-headline-xl); }
+}
+
+/* Spacing helpers */
+.px-gutter { padding-left: var(--gutter); padding-right: var(--gutter); }
+.mx-frame { max-width: var(--container-max); margin-left: auto; margin-right: auto; }
+
+
+
+
+
+/* Custom styles for gorgeous custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #e4e4e7;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #d4d4d8;
+}
+
+/* No-scrollbar utility */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Range slider — Stitch reference style */
+.custom-range {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 2px;
+  background: #e5e2e1;
+  outline: none;
+}
+.custom-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  background: #000000;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid white;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+.custom-range-accent::-webkit-slider-thumb {
+  background: #4b41e1;
+}
+
+/* Material Symbols */
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  font-size: 24px;
+}
+
+/* Active scale for tap feedback */
+.active-scale:active {
+  transform: scale(0.98);
+  transition: transform 100ms cubic-bezier(0.4, 0, 0.2, 1);
+}

@@ -1,0 +1,6 @@
+{
+  "name": "SLAY AI",
+  "description": "AI-powered outfit discovery that curates personalized, high-aesthetic looks from top brands like Myntra, Ajio, and Meesho.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,5 +1,6 @@
 import React from "react";
 import { Gender, Occasion, Accessory } from "./types";
+import { trackGenderSelect, trackAgeSelect, trackOccasionSelect, trackBudgetSet } from "./analytics";
 
 type Props = {
   gender: Gender;
@@ -26,7 +27,7 @@ const accessoryConfig: { key: Accessory; icon: string; label: string }[] = [
 ];
 
 const occasionsList: { value: Occasion; label: string; icon: string; sub: string }[] = [
-  { value: "Everyday & College",            icon: "school",            label: "Everyday",      sub: "& College"         },
+  { value: "Everyday & College",            icon: "checkroom",         label: "Everyday",      sub: "& College"         },
   { value: "Office & Work Mode",            icon: "work",              label: "Office",        sub: "& Work Mode"       },
   { value: "Fusion Wear",                   icon: "auto_awesome",      label: "Fusion Wear",   sub: "For Women"         },
   { value: "Cafe & Weekend Hangout",        icon: "local_cafe",        label: "Cafe",          sub: "& Weekend Hangout" },
@@ -81,7 +82,10 @@ export default function Onboarding(props: Props) {
               return (
                 <button
                   key={g}
-                  onClick={() => setGender(g)}
+                  onClick={() => {
+                    setGender(g);
+                    trackGenderSelect(g);
+                  }}
                   aria-pressed={active}
                   aria-label={`Select ${g}`}
                   className={`flex-1 py-3 px-4 rounded-full border font-bold text-[12px] tracking-widest uppercase transition-all active:scale-[0.98] ${
@@ -115,6 +119,7 @@ export default function Onboarding(props: Props) {
               max={55}
               value={age}
               onChange={(e) => setAge(parseInt(e.target.value))}
+              onPointerUp={() => trackAgeSelect(age)}
             />
             <div className="flex justify-between mt-4 text-[10px] text-[#747878] font-bold tracking-tighter">
               <span>15 YEARS</span>
@@ -134,7 +139,10 @@ export default function Onboarding(props: Props) {
               return (
                 <button
                   key={value}
-                  onClick={() => setOccasion(value as Occasion)}
+                  onClick={() => {
+                    setOccasion(value as Occasion);
+                    trackOccasionSelect(value);
+                  }}
                   aria-pressed={active}
                   className={`accessory-tile relative p-4 border rounded-lg flex flex-col items-center justify-center gap-3 cursor-pointer transition-all active:scale-[0.98] group ${
                     active
@@ -233,6 +241,7 @@ export default function Onboarding(props: Props) {
               step={100}
               value={budget}
               onChange={(e) => setBudget(parseInt(e.target.value))}
+              onPointerUp={() => trackBudgetSet(budget)}
             />
             <div className="flex justify-between mt-4 text-[10px] text-[#747878] font-bold tracking-tighter">
               <span>₹300</span>

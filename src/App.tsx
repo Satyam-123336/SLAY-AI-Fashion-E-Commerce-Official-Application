@@ -1,8 +1,16 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { X, Heart, Share2, ShoppingBag, RotateCw, SlidersHorizontal } from "lucide-react";
 import { Gender, Occasion, Accessory, SlayOutfit, SlayItem } from "./types";
 import Onboarding from "./Onboarding";
+import {
+  trackAppOpen, trackOnboardingStart, trackScreenView,
+  trackCurateStart, trackCurateSuccess, trackCurateError,
+  trackOutfitListView, trackOutfitCardView, trackOutfitDetailOpen,
+  trackItemBuyClick, trackShareStart, trackShareSuccess,
+  trackCarouselSwipe, trackMenuOpen, trackRestyle, trackSoundToggle,
+  trackAccessoryToggle,
+} from "./analytics";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -72,9 +80,25 @@ export default function App() {
   const [showSplash, setShowSplash]                     = useState<boolean>(true);
 
   React.useEffect(() => {
-    const t = setTimeout(() => setShowSplash(false), 2600);
+    trackAppOpen();
+    const t = setTimeout(() => {
+      setShowSplash(false);
+      trackOnboardingStart();
+    }, 2600);
     return () => clearTimeout(t);
   }, []);
+
+  // Track screen transitions
+  React.useEffect(() => {
+    trackScreenView(screen);
+  }, [screen]);
+
+  // Track active outfit view when swiping in results
+  React.useEffect(() => {
+    if (screen === "results" && outfits.length > 0) {
+      trackOutfitCardView(outfits[activeIndex], activeIndex);
+    }
+  }, [activeIndex, screen, outfits]);
 
   /** Track which item images have failed so we show the gradient fallback */
   const [brokenImgs, setBrokenImgs]                     = useState<Record<string, boolean>>({});
@@ -98,10 +122,15 @@ export default function App() {
   }, [isMuted]);
 
   // ── API call
+  const curateStartTimeRef = useRef<number>(0);
   const handleCurate = async () => {
     setScreen("curating");
     setErrorMessage(null);
     playBeep(520, "sine", 0.1);
+    curateStartTimeRef.current = Date.now();
+
+    // 🔥 Analytics: user tapped SLAY MY LOOK
+    trackCurateStart({ gender, age, occasion, accessories: selectedAccessories, budget });
 
     try {
       const response = await fetch("/api/curate", {
@@ -134,24 +163,42 @@ export default function App() {
       if (!data.outfits?.length)
         throw new Error("No outfits found. Try adjusting your budget or preferences!");
 
+      const durationMs = Date.now() - curateStartTimeRef.current;
+
       setOutfits(data.outfits);
       setActiveIndex(0);
       setBrokenImgs({});
       setSelectedOutfitDetail(null);
       setScreen("results");
       playBeep(880, "sine", 0.15);
+
+      // 🔥 Analytics: outfits successfully generated
+      trackCurateSuccess({
+        outfitCount: data.outfits.length,
+        totalItems: data.outfits.reduce((s: number, o: SlayOutfit) => s + o.items.length, 0),
+        occasion,
+        budget,
+        durationMs,
+      });
+      trackOutfitListView(data.outfits, occasion);
+
     } catch (err: any) {
       console.error("Curation error:", err);
-      setErrorMessage(err.message || "Something went wrong. Tap to try again.");
+      const msg = err.message || "Something went wrong. Tap to try again.";
+      setErrorMessage(msg);
       setScreen("onboarding");
+      // 🔥 Analytics: generation failed
+      trackCurateError(msg, occasion, budget);
     }
   };
 
   const toggleAccessory = (acc: Accessory) => {
     playBeep(450, "sine", 0.04);
-    setSelectedAccessories((prev) =>
-      prev.includes(acc) ? prev.filter((a) => a !== acc) : [...prev, acc]
-    );
+    setSelectedAccessories((prev) => {
+      const isSelected = prev.includes(acc);
+      trackAccessoryToggle(acc, !isSelected);
+      return isSelected ? prev.filter((a) => a !== acc) : [...prev, acc];
+    });
   };
 
   const toggleSaveOutfit = (e: React.MouseEvent, id: string) => {
@@ -162,40 +209,267 @@ export default function App() {
     );
   };
 
+  /** Builds a self-contained branded share card PNG — all text embedded inside the image */
+  const buildShareImage = async (outfit: SlayOutfit): Promise<File | null> => {
+    const W = 800;
+    // Dynamic height: header(80) + collage(420) + item rows(70*n) + footer(140)
+    const HEADER_H = 80;
+    const COLLAGE_H = 420;
+    const ITEM_ROW_H = 68;
+    const FOOTER_H = 140;
+    const H = HEADER_H + COLLAGE_H + outfit.items.length * ITEM_ROW_H + FOOTER_H;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+
+    // ─── Helpers ───────────────────────────────────────────────────
+    const fillRoundRect = (x: number, y: number, w: number, h: number, r: number, color: string) => {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, r);
+      ctx.fill();
+    };
+
+    const loadImg = (src: string): Promise<HTMLImageElement | null> =>
+      new Promise((res) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => res(img);
+        img.onerror = () => res(null);
+        img.src = src;
+      });
+
+    const drawCoverImg = (img: HTMLImageElement, x: number, y: number, w: number, h: number) => {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, y, w, h);
+      ctx.clip();
+      const scale = Math.max(w / img.naturalWidth, h / img.naturalHeight);
+      const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
+      ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+      ctx.restore();
+    };
+
+    // ─── 1. HEADER ─────────────────────────────────────────────────
+    // Purple gradient header
+    const headerGrad = ctx.createLinearGradient(0, 0, W, HEADER_H);
+    headerGrad.addColorStop(0, "#4b41e1");
+    headerGrad.addColorStop(1, "#6c5ce7");
+    ctx.fillStyle = headerGrad;
+    ctx.fillRect(0, 0, W, HEADER_H);
+
+    // SLAY AI wordmark
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 28px Inter, Arial, sans-serif";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    ctx.fillText("SLAY AI", 32, HEADER_H / 2);
+
+    // Tag badge (right side)
+    const TAG = (outfit.tag || "SLAY PICK").toUpperCase();
+    ctx.font = "bold 12px Inter, Arial, sans-serif";
+    const tagW = ctx.measureText(TAG).width + 24;
+    fillRoundRect(W - tagW - 28, HEADER_H / 2 - 14, tagW, 28, 14, "rgba(255,255,255,0.20)");
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "right";
+    ctx.fillText(TAG, W - 28 - 12, HEADER_H / 2);
+
+    // ─── 2. IMAGE COLLAGE ──────────────────────────────────────────
+    const imgItems = outfit.items.filter(it => it.imageUrl);
+    const loaded = await Promise.all(imgItems.map(it => loadImg(it.imageUrl!)));
+    const imgs = loaded
+      .map((img, i) => ({ img, item: imgItems[i] }))
+      .filter(x => x.img !== null) as { img: HTMLImageElement; item: typeof imgItems[0] }[];
+
+    const CY = HEADER_H; // collage starts here
+
+    if (imgs.length === 0) {
+      const grd = ctx.createLinearGradient(0, CY, W, CY + COLLAGE_H);
+      grd.addColorStop(0, (outfit.items[0]?.colorHex || "#4b41e1") + "88");
+      grd.addColorStop(1, "#1c1b1b");
+      ctx.fillStyle = grd;
+      ctx.fillRect(0, CY, W, COLLAGE_H);
+    } else if (imgs.length === 1) {
+      drawCoverImg(imgs[0].img, 0, CY, W, COLLAGE_H);
+    } else if (imgs.length === 2) {
+      const hw = Math.floor(W / 2);
+      drawCoverImg(imgs[0].img, 0, CY, hw - 1, COLLAGE_H);
+      drawCoverImg(imgs[1].img, hw + 1, CY, W - hw - 1, COLLAGE_H);
+    } else if (imgs.length === 3) {
+      const lw = Math.floor(W * 0.56);
+      drawCoverImg(imgs[0].img, 0, CY, lw - 1, COLLAGE_H);
+      const rh = Math.floor(COLLAGE_H / 2);
+      drawCoverImg(imgs[1].img, lw + 1, CY, W - lw - 1, rh - 1);
+      drawCoverImg(imgs[2].img, lw + 1, CY + rh + 1, W - lw - 1, COLLAGE_H - rh - 1);
+    } else {
+      const hw = Math.floor(W / 2), rh = Math.floor(COLLAGE_H / 2);
+      drawCoverImg(imgs[0].img, 0, CY, hw - 1, rh - 1);
+      drawCoverImg(imgs[1].img, hw + 1, CY, W - hw - 1, rh - 1);
+      drawCoverImg(imgs[2].img, 0, CY + rh + 1, hw - 1, COLLAGE_H - rh - 1);
+      drawCoverImg(imgs[3].img, hw + 1, CY + rh + 1, W - hw - 1, COLLAGE_H - rh - 1);
+    }
+
+    // Dark gradient overlay at bottom of collage
+    const fade = ctx.createLinearGradient(0, CY + COLLAGE_H - 80, 0, CY + COLLAGE_H);
+    fade.addColorStop(0, "rgba(13,13,13,0)");
+    fade.addColorStop(1, "rgba(13,13,13,0.85)");
+    ctx.fillStyle = fade;
+    ctx.fillRect(0, CY + COLLAGE_H - 80, W, 80);
+
+    // Look name overlaid on collage bottom
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 30px Inter, Arial, sans-serif";
+    ctx.textBaseline = "bottom";
+    ctx.textAlign = "left";
+    ctx.fillText(outfit.lookName, 28, CY + COLLAGE_H - 18);
+
+    // Colour strip at very bottom of collage
+    const stripH = 5;
+    const stripW = W / outfit.items.length;
+    outfit.items.forEach((item, i) => {
+      ctx.fillStyle = item.colorHex || "#4b41e1";
+      ctx.fillRect(i * stripW, CY + COLLAGE_H - stripH, stripW, stripH);
+    });
+
+    // ─── 3. ITEM BREAKDOWN (white section) ─────────────────────────
+    const ITEMS_Y = HEADER_H + COLLAGE_H;
+    ctx.fillStyle = "#f9f8f8";
+    ctx.fillRect(0, ITEMS_Y, W, outfit.items.length * ITEM_ROW_H);
+
+    outfit.items.forEach((item, i) => {
+      const rowY = ITEMS_Y + i * ITEM_ROW_H;
+
+      // Subtle divider (except first)
+      if (i > 0) {
+        ctx.strokeStyle = "#ececec";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(28, rowY);
+        ctx.lineTo(W - 28, rowY);
+        ctx.stroke();
+      }
+
+      // Colour dot
+      ctx.fillStyle = item.colorHex || "#aaa";
+      ctx.beginPath();
+      ctx.arc(44, rowY + ITEM_ROW_H / 2, 10, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Type label
+      fillRoundRect(64, rowY + ITEM_ROW_H / 2 - 12, 90, 24, 6, "#f0eefe");
+      ctx.fillStyle = "#4b41e1";
+      ctx.font = "bold 11px Inter, Arial, sans-serif";
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "left";
+      ctx.fillText(item.type.toUpperCase(), 72, rowY + ITEM_ROW_H / 2);
+
+      // Item name + brand
+      ctx.fillStyle = "#1c1b1b";
+      ctx.font = "bold 15px Inter, Arial, sans-serif";
+      ctx.fillText(`${item.brand}`, 170, rowY + ITEM_ROW_H / 2 - 9);
+      ctx.fillStyle = "#6b7280";
+      ctx.font = "13px Inter, Arial, sans-serif";
+      // Truncate name if too long
+      let name = item.name;
+      while (name.length > 2 && ctx.measureText(name).width > W - 310) name = name.slice(0, -4) + "…";
+      ctx.fillText(name, 170, rowY + ITEM_ROW_H / 2 + 9);
+
+      // Price (right aligned)
+      ctx.fillStyle = "#1c1b1b";
+      ctx.font = "bold 16px 'Courier New', monospace";
+      ctx.textAlign = "right";
+      ctx.fillText(`₹${item.price.toLocaleString("en-IN")}`, W - 28, rowY + ITEM_ROW_H / 2);
+      ctx.textAlign = "left";
+    });
+
+    // ─── 4. FOOTER ─────────────────────────────────────────────────
+    const FY = ITEMS_Y + outfit.items.length * ITEM_ROW_H;
+    ctx.fillStyle = "#1c1b1b";
+    ctx.fillRect(0, FY, W, FOOTER_H);
+
+    // Total row
+    ctx.fillStyle = "#9ca3af";
+    ctx.font = "bold 12px Inter, Arial, sans-serif";
+    ctx.textBaseline = "top";
+    ctx.textAlign = "left";
+    ctx.fillText("TOTAL OUTFIT COST", 32, FY + 24);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 32px 'Courier New', monospace";
+    ctx.fillText(`₹${outfit.totalPrice.toLocaleString("en-IN")}`, 32, FY + 42);
+
+    // Platform badges
+    const platforms = ["Myntra", "Ajio", "Meesho"];
+    let bx = W - 28;
+    ctx.font = "bold 11px Inter, Arial, sans-serif";
+    platforms.reverse().forEach((p) => {
+      const pw = ctx.measureText(p).width + 20;
+      bx -= pw;
+      fillRoundRect(bx, FY + 28, pw, 24, 12, "rgba(255,255,255,0.10)");
+      ctx.fillStyle = "#ffffff";
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "left";
+      ctx.fillText(p, bx + 10, FY + 40);
+      bx -= 8;
+    });
+
+    // Divider
+    ctx.strokeStyle = "#2a2a2a";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(32, FY + 88); ctx.lineTo(W - 32, FY + 88);
+    ctx.stroke();
+
+    // Footer branding line
+    ctx.fillStyle = "#6b7280";
+    ctx.font = "11px Inter, Arial, sans-serif";
+    ctx.textBaseline = "top";
+    ctx.textAlign = "left";
+    ctx.fillText("Curated by SLAY AI  ·  slay-ai.app  ·  3 fits. 30 seconds. In your budget.", 32, FY + 100);
+
+    return new Promise((res) => {
+      canvas.toBlob((blob) => {
+        if (!blob) { res(null); return; }
+        res(new File([blob], `slay-ai-${outfit.lookName.replace(/\s+/g, "-")}.png`, { type: "image/png" }));
+      }, "image/png");
+    });
+  };
+
   const handleShare = async (e: React.MouseEvent, outfit: SlayOutfit) => {
     e.stopPropagation();
     playBeep(720, "sine", 0.05);
+    trackShareStart(outfit.lookName, outfit.totalPrice);
 
     const appUrl = window.location.origin;
-    const itemsSummary = outfit.items
-      .map((it) => `${it.type}: ${it.brand} ${it.name} (₹${it.price.toLocaleString("en-IN")})`)
-      .join(" | ");
     const shareTitle = `SLAY AI - ${outfit.lookName}`;
-    const shareText = `✨ Check out this ${outfit.lookName} look I curated on SLAY AI!\n\n${itemsSummary}\n\nTotal: ₹${outfit.totalPrice.toLocaleString("en-IN")}\n\nCurate yours in 30 seconds 👉 ${appUrl}`;
-    const shareUrl = appUrl;
+    // Caption is short — all details are embedded inside the shared PNG card
+    const shareText = `\u2728 Found my look on SLAY AI! "${outfit.lookName}" for \u20b9${outfit.totalPrice.toLocaleString("en-IN")} \ud83d\udc8e\nCurate yours \u2192 ${appUrl}`;
 
-    // Use native share sheet on mobile (WhatsApp, Instagram, iMessage, etc.)
+    // Try to share with image file
     if (navigator.share) {
       try {
-        await navigator.share({ title: shareTitle, text: shareText, url: shareUrl });
+        const file = await buildShareImage(outfit);
+        const shareData: ShareData = file && navigator.canShare?.({ files: [file] })
+          ? { title: shareTitle, text: shareText, files: [file] }
+          : { title: shareTitle, text: shareText, url: appUrl };
+        await navigator.share(shareData);
         setShowCopiedBadge(true);
         setTimeout(() => setShowCopiedBadge(false), 2200);
+        trackShareSuccess("native_share", outfit.lookName);
         return;
       } catch (err: any) {
-        // User dismissed the share sheet — don't show any toast
         if (err?.name === "AbortError") return;
       }
     }
 
-    // Fallback: copy rich text to clipboard
+    // Fallback: clipboard
     try {
       await navigator.clipboard.writeText(shareText);
     } catch {
-      // Last resort: use execCommand
       const ta = document.createElement("textarea");
       ta.value = shareText;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
+      ta.style.cssText = "position:fixed;opacity:0";
       document.body.appendChild(ta);
       ta.select();
       document.execCommand("copy");
@@ -203,6 +477,7 @@ export default function App() {
     }
     setShowCopiedBadge(true);
     setTimeout(() => setShowCopiedBadge(false), 2200);
+    trackShareSuccess("clipboard", outfit.lookName);
   };
 
   /** DuckDuckGo !bang redirect — lands directly on the product search page */
@@ -271,7 +546,7 @@ export default function App() {
           </h1>
           <button
             aria-label="Open menu"
-            onClick={() => { setMenuOpen(true); playBeep(400, "sine", 0.04); }}
+            onClick={() => { trackMenuOpen(); setMenuOpen(true); playBeep(400, "sine", 0.04); }}
             className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-stone-100 transition-colors active:scale-95"
           >
             <span className="material-symbols-outlined text-black" style={{ fontSize: 22 }}>menu</span>
@@ -318,7 +593,7 @@ export default function App() {
                 <div className="overflow-y-auto no-scrollbar px-6 py-5 space-y-6">
                   {/* Tagline */}
                   <p className="text-[13px] text-stone-500 leading-relaxed">
-                    Think of me as your personal digital stylist. I'll put together 3 fits in 30 seconds — all within your budget.
+                    Think of me as your personal digital stylist. I'll put together 3 fits in 30 seconds - all within your budget.
                   </p>
 
                   {/* How it works */}
@@ -331,7 +606,7 @@ export default function App() {
                         { icon: "tune",           text: "Set your style preferences" },
                         { icon: "auto_awesome",   text: "SLAY AI curates 3 lookbooks" },
                         { icon: "style",          text: "Tap cards to view outfit details" },
-                        { icon: "shopping_bag",   text: "Buy directly from Myntra, Ajio & Meesho" },
+                        { icon: "shopping_bag",   text: "Buy from Myntra, Ajio & many more trusted brands" },
                       ].map(({ icon, text }, i) => (
                         <div key={i} className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-full bg-stone-100 flex items-center justify-center shrink-0">
@@ -353,14 +628,15 @@ export default function App() {
                     <div className="flex flex-wrap gap-2">
                       {[
                         { name: "Myntra", cls: "text-[#E61A5C] bg-[#FFF0F4] border-[#FCD2DC]" },
-                        { name: "Ajio",   cls: "text-stone-800 bg-stone-50 border-stone-200" },
-                        { name: "Meesho", cls: "text-pink-600 bg-pink-50 border-pink-100" },
-                      ].map((p) => (
+                        { name: "Ajio",   cls: "text-[#2c3e50] bg-[#f8f9fa] border-[#e9ecef]" },
+                        { name: "Meesho", cls: "text-[#9F2089] bg-[#FDF0F9] border-[#F7D4EE]" },
+                        { name: "& More...", cls: "text-stone-500 bg-stone-50 border-stone-200" },
+                      ].map((shop, i) => (
                         <span
-                          key={p.name}
-                          className={`text-[11px] font-bold px-3 py-1.5 rounded-full border ${p.cls}`}
+                          key={shop.name}
+                          className={`text-[11px] font-bold px-3 py-1.5 rounded-full border ${shop.cls}`}
                         >
-                          {p.name}
+                          {shop.name}
                         </span>
                       ))}
                     </div>
@@ -437,15 +713,12 @@ export default function App() {
                   </span>
                 </div>
 
-                <h4 className="font-display text-[14px] font-black text-black uppercase tracking-tight mb-2">
+                <h4 className="font-display text-[18px] font-black text-black uppercase tracking-tight mb-6">
                   Curating Your Lookbook
                 </h4>
-                <p className="text-[10px] text-stone-400 tracking-widest font-mono uppercase mb-8">
-                  Myntra · Ajio · Meesho
-                </p>
 
                 {/* Step indicators */}
-                <div className="w-full max-w-[220px] space-y-3">
+                <div className="w-full max-w-[220px] mx-auto space-y-3 text-left">
                   {[
                     "Analyzing style preferences",
                     "Matching trend databases",
@@ -489,8 +762,7 @@ export default function App() {
                   </button>
                   <button
                     type="button"
-                    onClick={handleCurate}
-                    aria-label="Regenerate outfits"
+                    onClick={() => { trackRestyle(); handleCurate(); }}
                     className="flex-1 flex items-center justify-center gap-1.5 text-[11px] font-bold text-stone-700 hover:text-black transition-all bg-stone-50 hover:bg-stone-100 border border-stone-200 px-3 py-2 rounded-xl"
                   >
                     <RotateCw className="h-3.5 w-3.5 text-emerald-600" />
@@ -543,8 +815,9 @@ export default function App() {
                         transition={{ type: "spring", stiffness: 290, damping: 25 }}
                         onClick={() => {
                           if (isActive) {
+                            trackOutfitDetailOpen(outfit, index);
                             setSelectedOutfitDetail(outfit);
-                            playBeep(780, "sine", 0.08);
+                            playBeep(480, "triangle", 0.05);
                           } else {
                             setActiveIndex(index);
                             playBeep(520, "sine", 0.05);
@@ -631,16 +904,8 @@ export default function App() {
                             </span>
                           </div>
 
-                          {/* Save + Share top-right */}
+                          {/* Share top-right */}
                           <div className="absolute top-2 right-2 flex gap-1">
-                            <button
-                              type="button"
-                              onClick={(e) => toggleSaveOutfit(e, outfit.id)}
-                              aria-label={isSaved ? "Unsave outfit" : "Save outfit"}
-                              className="p-1.5 rounded-full bg-[#1c1b1b]/70 backdrop-blur-sm border border-white/10 hover:bg-[#1c1b1b] transition-colors"
-                            >
-                              <Heart className={`h-3 w-3 ${isSaved ? "text-[#4b41e1] fill-[#4b41e1]" : "text-white/60"}`} />
-                            </button>
                             <button
                               type="button"
                               onClick={(e) => handleShare(e, outfit)}
@@ -873,7 +1138,10 @@ export default function App() {
                                 href={getBuyLink(item)}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                onClick={() => playBeep(920, "sine", 0.05)}
+                                onClick={() => {
+                                  playBeep(920, "sine", 0.05);
+                                  if (selectedOutfitDetail) trackItemBuyClick(item, selectedOutfitDetail.lookName, item.platform || "Unknown");
+                                }}
                                 className="shrink-0 flex items-center gap-1 bg-black text-white text-[10px] font-black px-3 py-1.5 rounded-lg hover:bg-stone-800 transition-all uppercase tracking-wide"
                               >
                                 Buy <ShoppingBag className="h-2.5 w-2.5" />

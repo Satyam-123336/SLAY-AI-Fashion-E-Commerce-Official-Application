@@ -43,6 +43,29 @@
     </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet" />
+
+    <!-- Google Analytics 4 -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-HTH9608DCF"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-HTH9608DCF', {
+        send_page_view: false,
+        cookie_flags: 'SameSite=None;Secure',
+        custom_map: {
+          dimension1: 'gender',
+          dimension2: 'occasion',
+          dimension3: 'age_group',
+          dimension4: 'budget_bucket',
+          dimension5: 'accessories',
+          dimension6: 'platform',
+          dimension7: 'outfit_name',
+          metric1:    'outfit_price',
+          metric2:    'api_latency_ms'
+        }
+      });
+    </script>
   </head>
   <body>
     <div id="root"></div>

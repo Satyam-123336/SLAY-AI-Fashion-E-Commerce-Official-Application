@@ -162,11 +162,45 @@ export default function App() {
     );
   };
 
-  const handleShare = (e: React.MouseEvent, outfit: SlayOutfit) => {
+  const handleShare = async (e: React.MouseEvent, outfit: SlayOutfit) => {
     e.stopPropagation();
     playBeep(720, "sine", 0.05);
-    const text = `Check this SLAY AI fit: "${outfit.lookName}" — Total ₹${outfit.totalPrice.toLocaleString("en-IN")}. Curate yours!`;
-    navigator.clipboard.writeText(text).catch(() => {});
+
+    const appUrl = window.location.origin;
+    const itemsSummary = outfit.items
+      .map((it) => `${it.type}: ${it.brand} ${it.name} (₹${it.price.toLocaleString("en-IN")})`)
+      .join(" | ");
+    const shareTitle = `SLAY AI - ${outfit.lookName}`;
+    const shareText = `✨ Check out this ${outfit.lookName} look I curated on SLAY AI!\n\n${itemsSummary}\n\nTotal: ₹${outfit.totalPrice.toLocaleString("en-IN")}\n\nCurate yours in 30 seconds 👉 ${appUrl}`;
+    const shareUrl = appUrl;
+
+    // Use native share sheet on mobile (WhatsApp, Instagram, iMessage, etc.)
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: shareTitle, text: shareText, url: shareUrl });
+        setShowCopiedBadge(true);
+        setTimeout(() => setShowCopiedBadge(false), 2200);
+        return;
+      } catch (err: any) {
+        // User dismissed the share sheet — don't show any toast
+        if (err?.name === "AbortError") return;
+      }
+    }
+
+    // Fallback: copy rich text to clipboard
+    try {
+      await navigator.clipboard.writeText(shareText);
+    } catch {
+      // Last resort: use execCommand
+      const ta = document.createElement("textarea");
+      ta.value = shareText;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
     setShowCopiedBadge(true);
     setTimeout(() => setShowCopiedBadge(false), 2200);
   };
@@ -472,7 +506,7 @@ export default function App() {
                 </div>
 
                 {/* ── Card Deck */}
-                <div className="relative flex-1 w-full flex items-center justify-center" style={{ minHeight: 272 }}>
+                <div className="relative flex-1 w-full flex items-center justify-center" style={{ minHeight: 330 }}>
                   {outfits.map((outfit, index) => {
                     const isActive   = index === activeIndex;
                     const offset     = index - activeIndex;
@@ -516,81 +550,144 @@ export default function App() {
                             playBeep(520, "sine", 0.05);
                           }
                         }}
-                        className="absolute bg-[#1c1b1b] rounded-2xl border border-[#2a2a2a] p-4 flex flex-col justify-between cursor-pointer select-none overflow-hidden shadow-2xl"
-                        style={{ width: "92%", height: 268 }}
+                        className="absolute bg-[#1c1b1b] rounded-2xl overflow-hidden shadow-2xl cursor-pointer select-none flex flex-col border border-[#2a2a2a]"
+                        style={{ width: "92%", height: 310 }}
                       >
-                        {/* Top row: tag + actions */}
-                        <div>
-                          <div className="flex justify-between items-start mb-2.5">
-                            <span className="text-[9px] font-black uppercase tracking-widest text-[#4b41e1] bg-[#4b41e1]/8 px-2.5 py-1 rounded">
+                        {/* ── TOP 65%: Visual Collage ─────────────────────────────── */}
+                        <div className="relative overflow-hidden flex-shrink-0" style={{ height: "62%" }}>
+                          {/* Dynamic image grid based on item count */}
+                          {(() => {
+                            const imgs = outfit.items.filter(it => it.imageUrl).slice(0, 4);
+                            const count = imgs.length;
+                            if (count === 0) {
+                              // Gradient placeholder
+                              return (
+                                <div className="w-full h-full" style={{
+                                  background: `linear-gradient(135deg, ${outfit.items[0]?.colorHex || '#4b41e1'}44, ${outfit.items[1]?.colorHex || '#1c1b1b'}88, #1c1b1b)`
+                                }} />
+                              );
+                            }
+                            if (count === 1) {
+                              return <img src={imgs[0].imageUrl} alt={imgs[0].name} className="w-full h-full object-cover" />;
+                            }
+                            if (count === 2) {
+                              return (
+                                <div className="w-full h-full flex gap-0.5">
+                                  {imgs.map((img, i) => (
+                                    <div key={i} className="flex-1 relative overflow-hidden">
+                                      <img src={img.imageUrl} alt={img.name} className="w-full h-full object-cover" />
+                                      <div className="absolute bottom-0 left-0 right-0 px-2 py-1.5 bg-black/80">
+                                        <span className="text-[9px] font-black uppercase tracking-widest text-white">{img.type}</span>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              );
+                            }
+                            if (count === 3) {
+                              return (
+                                <div className="w-full h-full flex gap-0.5">
+                                  <div className="w-[55%] relative overflow-hidden">
+                                    <img src={imgs[0].imageUrl} alt={imgs[0].name} className="w-full h-full object-cover" />
+                                    <div className="absolute bottom-0 left-0 right-0 px-2 py-1.5 bg-black/80">
+                                      <span className="text-[9px] font-black uppercase tracking-widest text-white">{imgs[0].type}</span>
+                                    </div>
+                                  </div>
+                                  <div className="flex-1 flex flex-col gap-0.5">
+                                    {imgs.slice(1).map((img, i) => (
+                                      <div key={i} className="flex-1 relative overflow-hidden">
+                                        <img src={img.imageUrl} alt={img.name} className="w-full h-full object-cover" />
+                                        <div className="absolute bottom-0 left-0 right-0 px-1.5 py-1 bg-black/80">
+                                          <span className="text-[8px] font-black uppercase tracking-widest text-white">{img.type}</span>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            }
+                            // 4 items: 2×2 grid
+                            return (
+                              <div className="w-full h-full grid grid-cols-2 gap-0.5">
+                                {imgs.map((img, i) => (
+                                  <div key={i} className="relative overflow-hidden">
+                                    <img src={img.imageUrl} alt={img.name} className="w-full h-full object-cover" />
+                                    <div className="absolute bottom-0 left-0 right-0 px-1.5 py-1 bg-black/80">
+                                      <span className="text-[8px] font-black uppercase tracking-widest text-white">{img.type}</span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })()}
+
+                          {/* Gradient fade into bottom section */}
+                          <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-[#1c1b1b] to-transparent pointer-events-none" />
+
+                          {/* Floating tag top-left */}
+                          <div className="absolute top-2.5 left-2.5">
+                            <span className="text-[9px] font-black uppercase tracking-widest text-white bg-[#4b41e1] px-2.5 py-1 rounded-full shadow-lg">
                               {outfit.tag || "SLAY PICK"}
                             </span>
-                            <div className="flex gap-1">
-                              <button
-                                type="button"
-                                onClick={(e) => toggleSaveOutfit(e, outfit.id)}
-                                aria-label={isSaved ? "Unsave outfit" : "Save outfit"}
-                                className="p-1.5 rounded-full hover:bg-stone-100 transition-colors"
-                              >
-                                <Heart className={`h-3 w-3 ${isSaved ? "text-[#4b41e1] fill-[#4b41e1]" : "text-stone-400"}`} />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => handleShare(e, outfit)}
-                                aria-label="Share outfit"
-                                className="p-1.5 rounded-full hover:bg-stone-100 transition-colors text-stone-400"
-                              >
-                                <Share2 className="h-3 w-3" />
-                              </button>
-                            </div>
                           </div>
 
-                          {/* Look name */}
-                          <h4 className="font-display text-[13px] font-extrabold tracking-tight text-white line-clamp-1 mb-2">
-                            {outfit.lookName}
-                          </h4>
-
-                          {/* Color palette strip — shows the outfit's color story */}
-                          <div className="flex gap-1.5 mb-2.5">
-                            {outfit.items.map((item, ci) => (
-                              <div
-                                key={ci}
-                                title={`${item.type}: ${item.colorHex}`}
-                                className="h-[5px] flex-1 rounded-full"
-                                style={{ backgroundColor: item.colorHex || "#e5e2e1" }}
-                              />
-                            ))}
-                          </div>
-
-                          {/* Item list */}
-                          <div className="bg-[#252424] rounded-xl border border-[#333] divide-y divide-[#333] overflow-hidden">
-                            {outfit.items.slice(0, 3).map((item, ii) => (
-                              <div key={ii} className="flex items-center justify-between px-2.5 py-1.5 gap-2">
-                                <div className="flex items-center gap-1.5 shrink-0">
-                                  <div
-                                    className="w-2.5 h-2.5 rounded-full border border-[#252424] shadow-sm shrink-0"
-                                    style={{ backgroundColor: item.colorHex || "#ccc" }}
-                                  />
-                                  <span className="text-[8px] font-black uppercase text-stone-400 tracking-wide">
-                                    {item.type}
-                                  </span>
-                                </div>
-                                <span className="text-[10px] font-semibold text-stone-300 truncate text-right">
-                                  {item.brand} · {item.name}
-                                </span>
-                              </div>
-                            ))}
+                          {/* Save + Share top-right */}
+                          <div className="absolute top-2 right-2 flex gap-1">
+                            <button
+                              type="button"
+                              onClick={(e) => toggleSaveOutfit(e, outfit.id)}
+                              aria-label={isSaved ? "Unsave outfit" : "Save outfit"}
+                              className="p-1.5 rounded-full bg-[#1c1b1b]/70 backdrop-blur-sm border border-white/10 hover:bg-[#1c1b1b] transition-colors"
+                            >
+                              <Heart className={`h-3 w-3 ${isSaved ? "text-[#4b41e1] fill-[#4b41e1]" : "text-white/60"}`} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => handleShare(e, outfit)}
+                              aria-label="Share outfit"
+                              className="p-1.5 rounded-full bg-[#1c1b1b]/70 backdrop-blur-sm border border-white/10 hover:bg-[#1c1b1b] transition-colors"
+                            >
+                              <Share2 className="h-3 w-3 text-white/60" />
+                            </button>
                           </div>
                         </div>
 
-                        {/* Card footer */}
-                        <div className="flex justify-between items-center pt-2 border-t border-[#333]">
-                          <span className="text-[8px] font-bold text-stone-500 uppercase tracking-widest">
-                            Tap for details
-                          </span>
-                          <span className="text-[11px] font-black text-white bg-[#333] px-2.5 py-0.5 rounded-lg font-mono">
-                            ₹{outfit.totalPrice.toLocaleString("en-IN")}
-                          </span>
+                        {/* ── BOTTOM 38%: Info ─────────────────────────────────────── */}
+                        <div className="flex flex-col justify-between px-3.5 pt-2.5 pb-3 flex-1">
+                          {/* Look name + colour palette */}
+                          <div>
+                            <h4 className="font-display text-[13px] font-extrabold tracking-tight text-white line-clamp-1 mb-1.5">
+                              {outfit.lookName}
+                            </h4>
+                            {/* Colour strip */}
+                            <div className="flex gap-1 mb-2">
+                              {outfit.items.map((item, ci) => (
+                                <div
+                                  key={ci}
+                                  title={`${item.type}: ${item.colorHex}`}
+                                  className="h-[3px] flex-1 rounded-full"
+                                  style={{ backgroundColor: item.colorHex || "#e5e2e1" }}
+                                />
+                              ))}
+                            </div>
+                            {/* Compact item pills */}
+                            <div className="flex flex-wrap gap-1">
+                              {outfit.items.slice(0, 3).map((item, ii) => (
+                                <span key={ii} className="flex items-center gap-1 bg-[#252424] border border-[#333] rounded-full px-2 py-0.5">
+                                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: item.colorHex || "#ccc" }} />
+                                  <span className="text-[8px] font-semibold text-stone-300 truncate max-w-[80px]">{item.brand}</span>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Footer: hint + price */}
+                          <div className="flex justify-between items-center pt-2 border-t border-[#2a2a2a] mt-2">
+                            <span className="text-[8px] font-bold text-stone-500 uppercase tracking-widest">Tap for details</span>
+                            <span className="text-[12px] font-black text-white bg-[#4b41e1]/20 border border-[#4b41e1]/30 px-2.5 py-0.5 rounded-lg font-mono">
+                              ₹{outfit.totalPrice.toLocaleString("en-IN")}
+                            </span>
+                          </div>
                         </div>
                       </motion.div>
                     );

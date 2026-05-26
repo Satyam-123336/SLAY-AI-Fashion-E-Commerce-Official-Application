@@ -48,9 +48,10 @@ const PLATFORM_LABEL: Record<string, string> = {
   Meesho: "TRENDING STORE",
 };
 
-/** Returns a reliable fashion image URL — uses AI-provided URL, then loremflickr fallback */
 function getItemImageUrl(item: SlayItem, seed: number): string {
-  if (item.imageUrl && item.imageUrl.startsWith("http")) return item.imageUrl;
+  if (item.imageUrl && (item.imageUrl.startsWith("http") || item.imageUrl.startsWith("data:"))) {
+    return item.imageUrl;
+  }
   const kw = TYPE_KEYWORDS[item.type] ?? "fashion,clothing";
   return `https://loremflickr.com/200/250/${encodeURIComponent(kw)}?lock=${seed}`;
 }
@@ -133,10 +134,12 @@ export default function App() {
     trackCurateStart({ gender, age, occasion, accessories: selectedAccessories, budget });
 
     try {
-      const response = await fetch("/api/curate", {
+      const apiUrl = import.meta.env.VITE_API_URL || "/api/curate";
+      const payload = { gender, age, occasion, accessories: selectedAccessories, budget };
+      const response = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gender, age, occasion, accessories: selectedAccessories, budget }),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -1060,7 +1063,7 @@ export default function App() {
                         const imgUrl  = getItemImageUrl(item, seed);
                         const isBroken = !!brokenImgs[imgKey];
                         const badgeStyle = PLATFORM_STYLE[item.platform] ?? PLATFORM_STYLE.Myntra;
-                        const platformLabel = PLATFORM_LABEL[item.platform] ?? "STORE";
+                        const platformLabel = item.platform ? item.platform.toUpperCase() : "STORE";
 
                         return (
                           <div

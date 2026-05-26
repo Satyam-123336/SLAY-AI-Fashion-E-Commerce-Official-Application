@@ -1,239 +1,190 @@
 import express from "express";
+import cors from "cors";
 import path from "path";
-import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-// Helper: simple page fetch wrapper
-async function fetchPageText(url: string, timeoutMs = 8000): Promise<string | null> {
+// Default fallback images just in case
+const FALLBACK_IMG = "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=300&h=400&fit=crop";
+
+const serperCache = new Map<string, any[]>();
+
+async function fetchSerperShopping(query: string) {
+  if (serperCache.has(query)) {
+    console.log(`[SLAY AI] Cache hit for "${query}"`);
+    return serperCache.get(query);
+  }
+
+  const apiKey = process.env.SERPER_API_KEY;
+  if (!apiKey) {
+    console.warn("SERPER_API_KEY is missing. Returning empty array.");
+    return [];
+  }
+
   try {
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch(url, { signal: controller.signal, redirect: "follow" });
-    clearTimeout(id);
-    if (!res.ok) return null;
-    const text = await res.text();
-    return text;
-  } catch (e) {
-    return null;
-  }
-}
-
-// Try to verify a product URL points to the expected domain and contains key text (brand/name)
-async function verifyProductUrl(productUrl: string | undefined, domain: string, keywords: string[]): Promise<string | null> {
-  if (!productUrl) return null;
-  try {
-    const text = await fetchPageText(productUrl);
-    if (!text) return null;
-    const lower = text.toLowerCase();
-    // Check domain existence and keywords
-    if (!productUrl.includes(domain)) return null;
-    for (const kw of keywords) {
-      if (!kw) continue;
-      if (lower.includes(kw.toLowerCase())) return productUrl;
-    }
-    // If no keyword matched, still accept if title/og:title exists
-    const ogTitle = /<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i.exec(text);
-    if (ogTitle && ogTitle[1]) return productUrl;
-    const title = /<title[^>]*>([^<]+)<\/title>/i.exec(text);
-    if (title && title[1]) return productUrl;
-    return null;
-  } catch (e) {
-    return null;
-  }
-}
-
-// Fall back to a DuckDuckGo site:search to find a likely product page for a query
-async function findProductBySiteSearch(domain: string, query: string): Promise<string | null> {
-  try {
-    const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent("site:" + domain + " " + query)}`;
-    const html = await fetchPageText(searchUrl);
-    if (!html) return null;
-    // Find anchors and pick the first link that contains the domain
-    const hrefRegex = /<a[^>]+href="([^"#]+)"/gi;
-    let m;
-    while ((m = hrefRegex.exec(html)) !== null) {
-      const href = m[1];
-      // duckduckgo may return relative or redirect links; prefer those that include domain
-      if (href.includes(domain)) return href.startsWith("http") ? href : `https://${domain}${href}`;
-      // Some links are redirect wrappers like /l/?kh=-1&uddg=<encoded-url>
-      const uddg = /uddg=([^&\"]+)/i.exec(href);
-      if (uddg && uddg[1]) {
-        try {
-          const decoded = decodeURIComponent(uddg[1]);
-          if (decoded.includes(domain)) return decoded;
-        } catch (e) {}
-      }
-    }
-    return null;
-  } catch (e) {
-    return null;
-  }
-}
-
-// Simple in-memory cache for verified product URLs (TTL in ms)
-const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
-const productCache = new Map<string, { url: string; ts: number }>();
-
-function cacheGet(key: string): string | null {
-  const v = productCache.get(key);
-  if (!v) return null;
-  if (Date.now() - v.ts > CACHE_TTL) {
-    productCache.delete(key);
-    return null;
-  }
-  return v.url;
-}
-
-function cacheSet(key: string, url: string) {
-  productCache.set(key, { url, ts: Date.now() });
-}
-
-// Generic product page parser: tries to extract canonical/og:url, og:title, and ld+json product entries
-function parseProductPageForUrl(html: string, domain: string): string | null {
-  // canonical link
-  const canonical = /<link[^>]*rel=["']canonical["'][^>]*href=["']([^"']+)["'][^>]*>/i.exec(html);
-  if (canonical && canonical[1] && canonical[1].includes(domain)) return canonical[1];
-
-  // og:url
-  const ogUrl = /<meta[^>]*property=["']og:url["'][^>]*content=["']([^"']+)["'][^>]*>/i.exec(html);
-  if (ogUrl && ogUrl[1] && ogUrl[1].includes(domain)) return ogUrl[1];
-
-  // ld+json product URL
-  const ld = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
-  let m;
-  while ((m = ld.exec(html)) !== null) {
-    try {
-      const obj = JSON.parse(m[1]);
-      if (obj && typeof obj === 'object') {
-        if (obj['@type'] && (obj['@type'].toLowerCase().includes('product') || obj['@type'] === 'Product')) {
-          if (obj.offers && obj.offers.url) return obj.offers.url;
-          if (obj.url && obj.url.includes(domain)) return obj.url;
-        }
-      }
-    } catch (e) {
-      // ignore
-    }
-  }
-
-  // fallback: first absolute link that contains the domain
-  const hrefRegex = /<a[^>]+href=["']([^"']+)["']/gi;
-  while ((m = hrefRegex.exec(html)) !== null) {
-    const href = m[1];
-    if (href.includes(domain)) return href.startsWith('http') ? href : `https://${domain}${href}`;
-  }
-
-  return null;
-}
-
-// Lazy initialize Gemini client to avoid crash if API key is not yet set.
-let aiClient: GoogleGenAI | null = null;
-function getGemini(): GoogleGenAI {
-  if (!aiClient) {
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) {
-      throw new Error("GEMINI_API_KEY environment variable is missing. Please set it in Settings > Secrets.");
-    }
-    aiClient = new GoogleGenAI({
-      apiKey: key,
-      httpOptions: {
-        headers: {
-          "User-Agent": "aistudio-build",
-        },
+    const res = await fetch("https://google.serper.dev/shopping", {
+      method: "POST",
+      headers: {
+        "X-API-KEY": apiKey,
+        "Content-Type": "application/json"
       },
+      body: JSON.stringify({ q: query, gl: "in" })
     });
-  }
-  return aiClient;
-}
-
-/** Models to try in order (fallback if rate-limited) */
-const MODEL_CHAIN = [
-  "gemini-2.0-flash",
-  "gemini-1.5-flash",
-  "gemini-1.5-pro",
-];
-
-/** Sleep helper */
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-/** Simple global async queue to serialize API requests */
-class AsyncQueue {
-  private queue: (() => Promise<void>)[] = [];
-  private processing = false;
-  async add<T>(task: () => Promise<T>): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      this.queue.push(async () => {
-        try { resolve(await task()); } catch (e) { reject(e); }
-      });
-      if (!this.processing) this.process();
-    });
-  }
-  private async process() {
-    this.processing = true;
-    while (this.queue.length > 0) {
-      const task = this.queue.shift();
-      if (task) await task();
+    
+    if (!res.ok) {
+      console.error(`Serper API error: ${res.status} ${res.statusText}`);
+      return [];
     }
-    this.processing = false;
+
+    const data = await res.json();
+    const shoppingResults = data.shopping || [];
+    if (shoppingResults.length > 0) {
+      serperCache.set(query, shoppingResults);
+    }
+    return shoppingResults;
+  } catch (error) {
+    console.error("Error fetching from Serper:", error);
+    return [];
   }
 }
-const globalApiQueue = new AsyncQueue();
 
-/**
- * generateWithFallback: tries each model in MODEL_CHAIN.
- * Enqueues requests globally to prevent rate-limit flooding.
- * On a 429, uses exponential backoff (up to 4 attempts).
- */
-async function generateWithFallback(
-  ai: GoogleGenAI,
-  contents: string,
-  config: any
-): Promise<any> {
-  return globalApiQueue.add(async () => {
-    let lastErr: any;
-    for (const model of MODEL_CHAIN) {
-      for (let attempt = 0; attempt < 4; attempt++) { // Up to 4 attempts
-        try {
-          const result = await ai.models.generateContent({ model, contents, config });
-          console.log(`[SLAY AI] Generated with model: ${model}`);
-          return result;
-        } catch (err: any) {
-          lastErr = err;
-          const status: number = err?.status ?? err?.httpStatus ?? 0;
-          if (status === 429) {
-            // Exponential backoff base: 4s, 8s, 16s, 32s
-            let waitMs = Math.pow(2, attempt) * 4000;
-            try {
-              const body = typeof err.errorDetails === "string" ? JSON.parse(err.errorDetails) : (err.errorDetails ?? {});
-              const retryInfoArr = (body?.details ?? body ?? []) as any[];
-              const retryInfo = retryInfoArr.find?.((d: any) => d["@type"]?.includes("RetryInfo"));
-              if (retryInfo?.retryDelay) {
-                const secs = parseInt(retryInfo.retryDelay.replace("s", ""));
-                if (!isNaN(secs)) waitMs = Math.max(waitMs, (secs + 1) * 1000);
-              }
-            } catch (_) {}
-            console.warn(`[SLAY AI] 429 on ${model} (attempt ${attempt + 1}/4), waiting ${waitMs}ms...`);
-            await sleep(waitMs);
-            continue; // retry same model
-          }
-          // Non-429 error — skip to next model
-          console.warn(`[SLAY AI] Error on ${model}:`, status, err?.message);
-          break;
-        }
+function parsePrice(priceStr: string | undefined): number {
+  if (!priceStr) return 0;
+  // Handle formats like "₹1,299", "Rs. 999", "1299"
+  const cleaned = priceStr.replace(/[^0-9]/g, "");
+  return parseInt(cleaned, 10) || 0;
+}
+
+// Randomly shuffles an array
+function shuffleArray<T>(array: T[]): T[] {
+  const arr = [...array];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+// Map occasions to preset names and descriptions
+const OCCASION_DATA: Record<string, { looks: string[], descriptions: string[] }> = {
+  office: {
+    looks: ["The Boardroom Edit", "Executive Polish", "Sharp & Sleek"],
+    descriptions: [
+      "A tailored, professional look designed to command the room with understated elegance.",
+      "Crisp silhouettes and refined fabrics perfect for high-stakes meetings.",
+      "Modern corporate wear that balances comfort with absolute authority."
+    ]
+  },
+  festive: {
+    looks: ["Golden Hour Traditional", "Festive Radiance", "Heritage Charm"],
+    descriptions: [
+      "Vibrant and deeply rooted in tradition, perfect for celebrations.",
+      "Rich textures and cultural elegance combined into a show-stopping outfit.",
+      "A celebration of heritage weaving classic cuts with modern vibrance."
+    ]
+  },
+  gym: {
+    looks: ["Performance Mode", "Active Flex", "Gym Ready"],
+    descriptions: [
+      "High-performance activewear built for maximum mobility and sweat wicking.",
+      "Streamlined athletic fit designed to keep you cool under pressure.",
+      "Engineered for endurance without compromising on sleek street-ready style."
+    ]
+  },
+  casual: {
+    looks: ["Streetwear Classic", "Weekend Effortless", "Campus Cool"],
+    descriptions: [
+      "Relaxed fits and effortless layering for perfect weekend styling.",
+      "Comfort-first streetwear that looks casually put together.",
+      "A versatile everyday ensemble that transitions smoothly from day to night."
+    ]
+  }
+};
+
+const DEFAULT_OCCASION = OCCASION_DATA.casual;
+
+const searchCache = new Map<string, string>();
+
+async function resolveDirectLink(item: any): Promise<string> {
+  if (item.link && !item.link.includes("google.com/search")) {
+    return item.link;
+  }
+  
+  const query = `${item.title} ${item.source || ""}`.trim();
+  if (searchCache.has(query)) {
+    return searchCache.get(query)!;
+  }
+
+  const apiKey = process.env.SERPER_API_KEY;
+  if (!apiKey) return item.link || "";
+
+  try {
+    const res = await fetch("https://google.serper.dev/search", {
+      method: "POST",
+      headers: {
+        "X-API-KEY": apiKey,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ q: query, gl: "in" })
+    });
+    
+    if (res.ok) {
+      const data = await res.json();
+      if (data.organic && data.organic.length > 0) {
+        const directLink = data.organic[0].link;
+        searchCache.set(query, directLink);
+        return directLink;
       }
     }
-    throw lastErr ?? new Error("All models exhausted.");
-  });
+  } catch (err) {
+    console.error("Error resolving direct link:", err);
+  }
+  
+  // Fallback to our naive search URL builder
+  const source = (item.source || "").toLowerCase();
+  const q = encodeURIComponent(item.title || "");
+  if (source.includes("myntra")) return `https://www.myntra.com/search?q=${q}`;
+  if (source.includes("ajio")) return `https://www.ajio.com/search/?text=${q}`;
+  if (source.includes("amazon")) return `https://www.amazon.in/s?k=${q}`;
+  if (source.includes("flipkart")) return `https://www.flipkart.com/search?q=${q}`;
+  
+  return item.link || "";
+}
+
+const CUELINKS_API_KEY = "0euXCF7bTcCsDgYQxgG-rIHSTvMSvgg5Hz1zGYHxfvc";
+
+async function wrapWithCuelinks(originalUrl: string): Promise<string> {
+  if (!originalUrl) return originalUrl;
+  try {
+    const res = await fetch("https://cuelinks.com/api/v2/links.json", {
+      method: "POST",
+      headers: {
+        "Authorization": `Token token="${CUELINKS_API_KEY}"`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ url: originalUrl })
+    });
+    
+    if (res.ok) {
+      const data = await res.json();
+      return data.affiliate_url || originalUrl;
+    }
+    
+    console.error(`[Cuelinks API] Failed with status ${res.status}`);
+  } catch (err) {
+    console.error("[Cuelinks API] Error:", err);
+  }
+  return originalUrl;
 }
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  app.use(cors({ origin: true }));
   app.use(express.json());
 
-  // API endpoints
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
   });
@@ -246,272 +197,175 @@ async function startServer() {
     }
 
     try {
-      const ai = getGemini();
+      console.log(`[SLAY AI] Curating for ${gender}, ${occasion}, Budget: ₹${budget}`);
 
-      const config = {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          required: ["outfits"],
-          properties: {
-            outfits: {
-              type: Type.ARRAY,
-              description: "Array of exactly 3 curated cohesive outfits.",
-              items: {
-                type: Type.OBJECT,
-                required: ["id", "lookName", "description", "tag", "totalPrice", "items"],
-                properties: {
-                  id: { type: Type.STRING },
-                  lookName: { type: Type.STRING, description: "A captivating, styling-led title (e.g. 'Effortless Streetwise Chic', 'Royal Heritage Elegance')" },
-                  description: { type: Type.STRING, description: "Professional stylist breakdown in 2-3 sentences explaining why this look works, styling advice, and confidence booster." },
-                  tag: { type: Type.STRING, description: "A cool label tag: e.g. 'Must Buy', 'Hot Seller', 'Ultra-Comfort', 'Editor Choice'" },
-                  totalPrice: { type: Type.INTEGER, description: "Total estimated price in INR for the full outfit." },
-                  items: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      required: ["type", "name", "brand", "price", "platform", "searchQuery", "productUrl", "colorHex", "styleAdvice"],
-                      properties: {
-                        type: { type: Type.STRING, description: "Product category: Topwear | Bottomwear | Footwear | Accessory" },
-                        name: { type: Type.STRING, description: "Specific and appealing item catalog name." },
-                        brand: { type: Type.STRING, description: "Trusted brand label." },
-                        price: { type: Type.INTEGER, description: "Estimated price in INR (e.g. 599)." },
-                        platform: { type: Type.STRING, description: "Must be 'Myntra' | 'Ajio' | 'Meesho'." },
-                        searchQuery: { type: Type.STRING, description: "Rich search query string for copy-pasting or searching the web marketplace." },
-                        productUrl: { type: Type.STRING, description: "A realistic and accurate deep-link URL pointing to a single specific product page on Myntra, Ajio, or Meesho." },
-                        colorHex: { type: Type.STRING, description: "Clean CSS hex code representing the main visual shade." },
-                        styleAdvice: { type: Type.STRING, description: "Quick professional micro styling tip (e.g. 'Tuck in slightly' or 'Pair with thin silver chains')." },
-                        imageUrl: { type: Type.STRING, description: "A real, publicly accessible product image URL from Unsplash CDN (e.g. https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=300&h=400&fit=crop) that visually represents this specific item's type, color and style." }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      };
+      // Determine outfit archetype based on occasion
+      const occLower = occasion.toLowerCase();
+      let occType = "casual";
+      if (occLower.includes("office") || occLower.includes("work") || occLower.includes("formal")) occType = "office";
+      if (occLower.includes("festive") || occLower.includes("wedding") || occLower.includes("traditional")) occType = "festive";
+      if (occLower.includes("gym") || occLower.includes("active") || occLower.includes("sport")) occType = "gym";
 
-
-      // Build the prompt
-      const prompt = `You are an elite, trendsetting celebrity fashion stylist called "SLAY AI" with your underlying training and trend databases upgraded up to May 2026.
-Your core mission is to save users style-curation time by delivering a hyper-personalized, complete outfit recommendation based on four key metrics: Gender (${gender}), Budget (₹${budget}), Occasion (${occasion}), and Age Group (${age} years old).
-
-To achieve this, you MUST perform deep, context-driven design synthesis across trusted, authentic, and verified style sources (top fashion blogs, industry news, style articles, and current trends up to May 2026). Analyze and implement the following styling datasets for every recommendation:
-1. **Cohesive Pairing**: Determine exactly which clothing pieces and styles complement each other perfectly (e.g., proportions, silhouettes, fabric weight).
-2. **Color Theory & Coordination**: Analyze which colors, tones, and patterns look best together for the selected occasion (monochromatic, complementary, triadic, neutral groundings).
-3. **Demographic Preferences**: Identify which outfits are statistically and aesthetically preferred by the selected age group (${age} years old).
-4. **Real-Time Trend Analysis**: Filter for what is currently trending, highly rated, and universally loved across the fashion and styling industry up to May 2026.
-
-Curate exactly 3 highly-cohesive, exceptionally stylish, and context-appropriate outfits (called "Lookbooks") suitable for standard Indian marketplace platforms like Myntra, Ajio, and Meesho.
-Make sure you respect the budget completely and don't overspend the limit!
-
-Criteria selected:
-- Gender: ${gender}
-- Age: ${age} years old
-- Occasion: ${occasion} (make sure the style completely matches this vibe: Casual, Traditional, Formal, Party, Date Night, Activewear)
-- Accessory & Footwear Inclusion List: [${accessories && accessories.length > 0 ? accessories.join(", ") : ""}]
-- Maximum Budget: ₹${budget} (INR)
-
-Strict Item Rules:
-- If the "Accessory & Footwear Inclusion List" is empty (contains no items), you MUST STRICLY EXCLUDE all accessories and footwear/shoes. In this case, each of the curated outfits MUST contain EXACTLY two items: 1 Topwear and 1 Bottomwear. Do NOT include Shoes or Footwear or any Accessory.
-- If the "Accessory & Footwear Inclusion List" contains selected items, you must only include items corresponding to those specific requested categories (e.g., if 'Shoes' is selected, you may include Footwear; if 'Bags' is selected, an Accessory, etc.). Do not include categories that are not specified in this list.
-
-For each outfit:
-1. Provide a creative trendsetting Look Name (sleek, memorable).
-2. Write a highly professional styling advice/concept description explanation.
-3. Suggest the set of items representing the outfit, making sure you strictly follow the inclusion/exclusion rules defined above.
-4. Assign highly accurate, real-world current prices to each item based on your May 2026 knowledge of Indian ecommerce. Do NOT generate random or hallucinated low prices. Ensure the exact total price of all items in an outfit is strictly less than or equal to ₹${budget}.
-5. Assign a recommended marketplace platform ('Myntra', 'Ajio', or 'Meesho') for each single item in a realistic manner (e.g. Ajio for premium/streetwear, Myntra for top brand fashion/shoes, Meesho for extremely pocket-friendly/traditional value finds).
-6. Create a precise, descriptive searchQuery for each item.
-7. Generate a real, high-quality, deep-link URL pointing to a single, specific physical product page (NOT search list URLs) on that platform ('Myntra', 'Ajio', or 'Meesho') that serves as the absolute best physical product fit to complete the curated outfit. Follow the realistic deep-link structures for each platform.
-8. Extract a visual hex-color code (e.g. "#1A2E3B") representing that item's primary style color.
-
-Return the result as structured JSON matching the requested schema.`;
-
-      const response = await generateWithFallback(ai, prompt, config);
-      const responseText = response.text;
-      if (!responseText) {
-        throw new Error("Empty response from AI engine.");
-      }
-
-      let cleanText = responseText.trim();
-      if (cleanText.startsWith("```")) {
-        cleanText = cleanText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-      }
-
-      const parsedJSON = JSON.parse(cleanText.trim());
-
-      // Post-process: verify productUrl for each item and attempt to fix missing/incorrect links
-      const domainMap: Record<string, string> = {
-        Myntra: "myntra.com",
-        Ajio: "ajio.com",
-        Meesho: "meesho.com",
-      };
-
-      for (const outfit of parsedJSON.outfits || []) {
-        for (const item of outfit.items || []) {
-          try {
-            const domain = domainMap[item.platform] || (item.productUrl ? new URL(item.productUrl).host : "");
-            const keywords = [item.brand || "", item.name || "", item.type || "", item.searchQuery || ""].filter(Boolean);
-
-            // Check cache first (keyed by domain+searchQuery)
-            const cacheKey = `${domain}::${(item.searchQuery || (item.brand + ' ' + item.name)).trim()}`;
-            const cached = cacheGet(cacheKey);
-            if (cached) {
-              item.productUrl = cached;
-              continue;
-            }
-
-            const verified = await verifyProductUrl(item.productUrl, domain, keywords);
-            if (verified) {
-              cacheSet(cacheKey, verified);
-            } else {
-              // Try parsing the provided productUrl (useful if AI gave a near URL)
-              if (item.productUrl) {
-                const page = await fetchPageText(item.productUrl);
-                if (page) {
-                  const parsed = parseProductPageForUrl(page, domain);
-                  if (parsed) {
-                    item.productUrl = parsed;
-                    cacheSet(cacheKey, parsed);
-                    continue;
-                  }
-                }
-              }
-
-              // Attempt site search fallback
-              const fallback = await findProductBySiteSearch(domain, item.searchQuery || `${item.brand} ${item.name}`);
-              if (fallback) {
-                // Try to verify or parse the fallback
-                const parsedPage = await fetchPageText(fallback);
-                if (parsedPage) {
-                  const parsed = parseProductPageForUrl(parsedPage, domain) || fallback;
-                  item.productUrl = parsed;
-                  cacheSet(cacheKey, parsed);
-                } else {
-                  item.productUrl = fallback;
-                  cacheSet(cacheKey, fallback);
-                }
-              }
-            }
-          } catch (e) {
-            // swallow — don't fail the whole response
-            console.error("Post-process product verification error:", e);
-          }
-        }
-      }
-
-      res.json(parsedJSON);
-    } catch (error: any) {
-      console.error("Discovery error:", error);
+      const archetype = OCCASION_DATA[occType] || DEFAULT_OCCASION;
       
+      // Determine what components we need to fetch
+      // For simplicity, we define 3 outfit combinations to provide variety
       
-      // Fallback: Dynamic mock data based on user input
-      let mockData: any = { outfits: [] };
-      const isOffice = occasion.toLowerCase().includes('office') || occasion.toLowerCase().includes('work');
-      const isFestive = occasion.toLowerCase().includes('festive') || occasion.toLowerCase().includes('wedding') || occasion.toLowerCase().includes('ethnic') || occasion.toLowerCase().includes('mehendi');
-      const isGym = occasion.toLowerCase().includes('gym') || occasion.toLowerCase().includes('athleisure');
-      const isFemale = gender.toLowerCase() === 'women';
-
-      if (isOffice && !isFemale) {
-        mockData.outfits = [
-          {
-            id: 'mock-office-m-1', lookName: 'Boardroom Elite', description: 'Sharp, polished look for high-stakes meetings and professional settings.', tag: 'Editor Choice', totalPrice: 2598,
-            items: [
-              { type: 'Topwear', name: 'Slim Fit White Dress Shirt', brand: 'Louis Philippe', price: 999, platform: 'Myntra', searchQuery: 'white formal shirt men', colorHex: '#FFFFFF', styleAdvice: 'Crisp and well-ironed.', imageUrl: 'https://images.unsplash.com/photo-1598033129183-c4f50c736f10?w=300&h=400&fit=crop' },
-              { type: 'Bottomwear', name: 'Tailored Navy Trousers', brand: 'Van Heusen', price: 1499, platform: 'Ajio', searchQuery: 'navy formal trousers men', colorHex: '#000080', styleAdvice: 'Perfect break right above the shoe.', imageUrl: 'https://images.unsplash.com/photo-1594938298603-c8148c4dae35?w=300&h=400&fit=crop' }
-            ]
-          }
-        ];
-      } else if (isOffice && isFemale) {
-        mockData.outfits = [
-          {
-            id: 'mock-office-f-1', lookName: 'Executive Grace', description: 'Power dressing with a modern feminine silhouette.', tag: 'Must Buy', totalPrice: 2498,
-            items: [
-              { type: 'Topwear', name: 'Silk Blend Formal Blouse', brand: 'Allen Solly', price: 999, platform: 'Ajio', searchQuery: 'women silk formal blouse', colorHex: '#F5F5DC', styleAdvice: 'Tuck it in for a sleek waistline.', imageUrl: 'https://images.unsplash.com/photo-1599577180579-7a522bf05044?w=300&h=400&fit=crop' },
-              { type: 'Bottomwear', name: 'High-Waist Pencil Skirt', brand: 'Marks & Spencer', price: 1499, platform: 'Myntra', searchQuery: 'black pencil skirt formal women', colorHex: '#111111', styleAdvice: 'Pairs beautifully with block heels.', imageUrl: 'https://images.unsplash.com/photo-1582142407894-ec85a1260a46?w=300&h=400&fit=crop' }
-            ]
-          }
-        ];
-      } else if (isFestive) {
-        mockData.outfits = [
-          {
-            id: 'mock-festive-1', lookName: 'Golden Hour', description: 'A vibrant, festive-ready ethnic look perfect for celebrations.', tag: 'Hot Seller', totalPrice: 2499,
-            items: [
-              { type: 'Topwear', name: 'Embroidered Kurta', brand: 'Manyavar', price: 1299, platform: 'Myntra', searchQuery: 'embroidered ethnic kurta', colorHex: '#C5A028', styleAdvice: 'Style with mojris for a complete traditional look.', imageUrl: 'https://images.unsplash.com/photo-1610189361394-70346b3b3ff2?w=300&h=400&fit=crop' },
-              { type: 'Bottomwear', name: 'Palazzo Pants', brand: 'Biba', price: 999, platform: 'Meesho', searchQuery: 'festive palazzo pants ethnic', colorHex: '#8B1A1A', styleAdvice: 'Flowy and festive.', imageUrl: 'https://images.unsplash.com/photo-1585487000160-6ebcfceb0d03?w=300&h=400&fit=crop' }
-            ]
-          }
-        ];
-      } else if (isGym) {
-        mockData.outfits = [
-          {
-            id: 'mock-gym-1', lookName: 'Power Mode', description: 'Sweat-wicking performance wear built for high-intensity workouts.', tag: 'Ultra-Comfort', totalPrice: 1798,
-            items: [
-              { type: 'Topwear', name: 'Dry-Fit Training Tee', brand: 'HRX by Hrithik Roshan', price: 699, platform: 'Myntra', searchQuery: 'dryfit gym training tee', colorHex: '#1A1A2E', styleAdvice: 'Lightweight and breathable.', imageUrl: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=300&h=400&fit=crop' },
-              { type: 'Bottomwear', name: 'Compression Shorts', brand: 'Adidas', price: 999, platform: 'Ajio', searchQuery: 'compression gym shorts', colorHex: '#2D2D2D', styleAdvice: 'Supports muscle groups during heavy lifts.', imageUrl: 'https://images.unsplash.com/photo-1506629082955-511b1aa562c8?w=300&h=400&fit=crop' }
-            ]
-          }
-        ];
-      } else {
-        mockData.outfits = [
-          {
-            id: 'mock-casual-1', lookName: 'Campus Cool', description: 'Effortlessly stylish everyday look for college and casual outings.', tag: 'Editor Choice', totalPrice: 1998,
-            items: [
-              { type: 'Topwear', name: 'Oversized Graphic Tee', brand: 'Roadster', price: 699, platform: 'Myntra', searchQuery: 'oversized graphic tee casual', colorHex: '#D8C3A5', styleAdvice: 'Keep it untucked for the streetwear vibe.', imageUrl: 'https://images.unsplash.com/photo-1576566588028-4147f3842f27?w=300&h=400&fit=crop' },
-              { type: 'Bottomwear', name: 'Relaxed Cargo Pants', brand: 'H&M', price: 1299, platform: 'Ajio', searchQuery: 'relaxed cargo pants casual', colorHex: '#4A4A4A', styleAdvice: 'Cuff the hem once for a cleaner finish.', imageUrl: 'https://images.unsplash.com/photo-1624378439575-d8705ad7ae80?w=300&h=400&fit=crop' }
-            ]
-          }
-        ];
+      // Fetch data for the categories
+      // We will concurrently search for Topwear, Bottomwear, and optionally Footwear/Accessories
+      const topwearQuery = `${gender} ${occLower} shirt top kurta in India`;
+      const bottomwearQuery = `${gender} ${occLower} trousers jeans pants in India`;
+      
+      let accessoryQuery = "";
+      if (accessories && accessories.length > 0) {
+        accessoryQuery = `${gender} ${accessories[0]} in India`;
       }
 
-      // Rewrite mock product URLs to point to our simulated store to guarantee price matching
-      mockData.outfits.forEach(outfit => {
-        outfit.items.forEach(item => {
-          item.productUrl = `http://localhost:3000/store?brand=${encodeURIComponent(item.brand)}&name=${encodeURIComponent(item.name)}&price=${item.price}&platform=${item.platform}&img=${encodeURIComponent(item.imageUrl)}`;
+      console.log(`[SLAY AI] Fetching from Serper...`);
+      const [topwearResults, bottomwearResults, accessoryResults] = await Promise.all([
+        fetchSerperShopping(topwearQuery),
+        fetchSerperShopping(bottomwearQuery),
+        accessoryQuery ? fetchSerperShopping(accessoryQuery) : Promise.resolve([])
+      ]);
+
+      // Filter function to sideline negative reviews (require >= 4.0 rating if present, or no rating)
+      const filterAndSortProducts = (items: any[]) => {
+        let valid = items.filter(item => {
+          if (item.rating && item.rating < 4.0) return false;
+          return true;
         });
-      });
+        
+        // Prioritize items WITH ratings
+        valid.sort((a, b) => {
+          const aScore = (a.rating || 0) * (a.ratingCount || 0);
+          const bScore = (b.rating || 0) * (b.ratingCount || 0);
+          return bScore - aScore;
+        });
 
-      res.json(mockData);
+        return valid;
+      };
+
+      const topwearClean = filterAndSortProducts(topwearResults);
+      const bottomwearClean = filterAndSortProducts(bottomwearResults);
+      const accessoryClean = filterAndSortProducts(accessoryResults);
+
+      if (topwearClean.length === 0 || bottomwearClean.length === 0) {
+        throw new Error("Could not find enough matching products from search.");
+      }
+
+      const outfits = [];
+
+      const topPool = topwearClean.slice(0, 10);
+      const botPool = bottomwearClean.slice(0, 10);
+      const accPool = accessoryClean.slice(0, 10);
+      
+      const allCombinations: any[] = [];
+      for (const t of topPool) {
+        for (const b of botPool) {
+          if (accPool.length > 0) {
+            for (const a of accPool) {
+              const total = parsePrice(t.price) + parsePrice(b.price) + parsePrice(a.price);
+              allCombinations.push({ t, b, a, total });
+            }
+          } else {
+            const total = parsePrice(t.price) + parsePrice(b.price);
+            allCombinations.push({ t, b, a: null, total });
+          }
+        }
+      }
+
+      // Filter combinations that fit the budget strictly
+      let validCombinations = allCombinations.filter(c => c.total <= budget);
+      
+      // If none fit the budget, just take the absolute cheapest combinations available
+      if (validCombinations.length === 0) {
+        allCombinations.sort((x, y) => x.total - y.total);
+        validCombinations = allCombinations.slice(0, 3);
+      } else {
+        validCombinations = shuffleArray(validCombinations);
+      }
+
+      for (let i = 0; i < 3; i++) {
+        if (!validCombinations[i % validCombinations.length]) break;
+        
+        const combo = validCombinations[i % validCombinations.length];
+        const selectedTop = combo.t;
+        const selectedBot = combo.b;
+        const selectedAcc = combo.a;
+        let totalPrice = combo.total;
+        
+        // Fetch direct links exactly!
+        let [topLink, botLink, accLink] = await Promise.all([
+          resolveDirectLink(selectedTop),
+          resolveDirectLink(selectedBot),
+          selectedAcc ? resolveDirectLink(selectedAcc) : Promise.resolve("")
+        ]);
+
+        // Wrap the direct links with Cuelinks API to generate affiliate commissions
+        [topLink, botLink, accLink] = await Promise.all([
+          wrapWithCuelinks(topLink),
+          wrapWithCuelinks(botLink),
+          accLink ? wrapWithCuelinks(accLink) : Promise.resolve("")
+        ]);
+
+        const outfitItems = [
+          {
+            type: "Topwear",
+            name: selectedTop.title || "Premium Topwear",
+            brand: selectedTop.source || "Partner Brand",
+            price: parsePrice(selectedTop.price),
+            platform: selectedTop.source || "Myntra",
+            searchQuery: topwearQuery,
+            productUrl: topLink,
+            colorHex: "#111111", // Default sleek color
+            styleAdvice: "Ensure a crisp fit for maximum impact.",
+            imageUrl: selectedTop.imageUrl || FALLBACK_IMG
+          },
+          {
+            type: "Bottomwear",
+            name: selectedBot.title || "Premium Bottomwear",
+            brand: selectedBot.source || "Partner Brand",
+            price: parsePrice(selectedBot.price),
+            platform: selectedBot.source || "Myntra",
+            searchQuery: bottomwearQuery,
+            productUrl: botLink,
+            colorHex: "#333333",
+            styleAdvice: "Perfect length to break just above the ankle.",
+            imageUrl: selectedBot.imageUrl || FALLBACK_IMG
+          }
+        ];
+
+        // Add accessory if requested
+        if (selectedAcc) {
+          outfitItems.push({
+            type: "Accessory",
+            name: selectedAcc.title || "Premium Accessory",
+            brand: selectedAcc.source || "Partner Brand",
+            price: parsePrice(selectedAcc.price),
+            platform: selectedAcc.source || "Myntra",
+            searchQuery: accessoryQuery,
+            productUrl: accLink,
+            colorHex: "#D4AF37", // Gold accent
+            styleAdvice: "The perfect finishing touch.",
+            imageUrl: selectedAcc.imageUrl || FALLBACK_IMG
+          });
+        }
+        
+        outfits.push({
+          id: `outfit-${Date.now()}-${i}`,
+          lookName: archetype.looks[i % archetype.looks.length],
+          description: archetype.descriptions[i % archetype.descriptions.length],
+          tag: i === 0 ? "Must Buy" : i === 1 ? "Highly Rated" : "Editor Choice",
+          totalPrice,
+          items: outfitItems
+        });
+      }
+
+      res.json({ outfits });
+    } catch (error: any) {
+      console.error("Curation error:", error);
+      res.status(500).json({ error: "Failed to curate outfits." });
     }
-  });
-
-  app.get("/store", (req, res) => {
-    const { brand, name, price, platform, img } = req.query;
-    const isDark = platform === "Myntra" || platform === "Ajio";
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>${brand} - ${name} | ${platform}</title>
-          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-          <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; background: #fff; color: #111; }
-            .header { padding: 16px 24px; border-bottom: 1px solid #eaeaea; font-weight: 900; font-size: 20px; letter-spacing: -0.5px; }
-            .container { max-width: 480px; margin: 0 auto; padding: 24px; }
-            .img-box { width: 100%; aspect-ratio: 3/4; background: #f5f5f5; border-radius: 12px; margin-bottom: 24px; overflow: hidden; }
-            .img-box img { width: 100%; height: 100%; object-fit: cover; }
-            .brand { font-size: 18px; font-weight: 800; text-transform: uppercase; margin: 0 0 4px 0; }
-            .name { font-size: 14px; color: #666; margin: 0 0 16px 0; }
-            .price { font-size: 24px; font-weight: 900; margin: 0 0 24px 0; }
-            .btn { display: block; width: 100%; padding: 16px; background: ${isDark ? '#111' : '#f43397'}; color: #fff; text-align: center; font-weight: bold; border-radius: 8px; text-decoration: none; border: none; font-size: 16px; }
-          </style>
-        </head>
-        <body>
-          <div class="header">${platform} <span style="color:#888; font-size:12px; font-weight:normal; float:right; margin-top:6px;">Partner Store</span></div>
-          <div class="container">
-            <div class="img-box">
-              <img src="${img || 'https://via.placeholder.com/400x500'}" alt="Product" />
-            </div>
-            <h1 class="brand">${brand}</h1>
-            <h2 class="name">${name}</h2>
-            <div class="price">₹${price}</div>
-            <button class="btn">Add to Bag</button>
-          </div>
-        </body>
-      </html>
-    `);
   });
 
   // Vite integration

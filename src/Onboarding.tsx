@@ -29,7 +29,7 @@ const accessoryConfig: { key: Accessory; icon: string; label: string }[] = [
 const occasionsList: { value: Occasion; label: string; icon: string; sub: string }[] = [
   { value: "Everyday & College",            icon: "checkroom",         label: "Everyday",      sub: "& College"         },
   { value: "Office & Work Mode",            icon: "work",              label: "Office",        sub: "& Work Mode"       },
-  { value: "Fusion Wear",                   icon: "auto_awesome",      label: "Fusion Wear",   sub: "For Women"         },
+  { value: "Fusion Wear",                   icon: "auto_awesome",      label: "Fusion Wear",   sub: "Men & Women"         },
   { value: "Cafe & Weekend Hangout",        icon: "local_cafe",        label: "Cafe",          sub: "& Weekend Hangout" },
   { value: "Wedding Guest & Mehendi Night", icon: "favorite",          label: "Wedding Guest", sub: "& Mehendi Night"   },
   { value: "Festive & Ethnic",              icon: "celebration",       label: "Festive",       sub: "& Ethnic"          },
@@ -210,7 +210,7 @@ export default function Onboarding(props: Props) {
                     {icon}
                   </span>
                   <span
-                    className={`text-[12px] font-semibold uppercase tracking-widest transition-colors ${
+                    className={`text-[10px] font-semibold uppercase tracking-wider text-center leading-tight transition-colors ${
                       sel ? "text-[#4b41e1] font-bold" : "text-[#444748] group-hover:text-[#1c1b1b]"
                     }`}
                   >

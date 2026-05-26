@@ -31,7 +31,7 @@ export interface SlayItem {
   name: string;
   brand: string;
   price: number;
-  platform: "Myntra" | "Ajio" | "Meesho";
+  platform: string;
   searchQuery: string;
   productUrl: string;
   colorHex: string;

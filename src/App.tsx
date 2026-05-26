@@ -23,30 +23,55 @@ function strSeed(...parts: string[]): number {
 }
 
 const TYPE_KEYWORDS: Record<string, string> = {
-  Topwear:    "fashion,shirt,clothing",
-  Bottomwear: "fashion,pants,jeans",
-  Footwear:   "shoes,footwear,fashion",
-  Accessory:  "watch,accessory,luxury",
+  Topwear:          "fashion,shirt,clothing",
+  Bottomwear:       "fashion,pants,jeans",
+  Footwear:         "shoes,footwear,fashion",
+  Accessory:        "watch,accessory,luxury",
+  Jewellery:        "jewellery,necklace,earrings",
+  Watches:          "watch,timepiece,luxury",
+  Sunglasses:       "sunglasses,eyewear,fashion",
+  Perfumes:         "perfume,fragrance,luxury",
+  "Bags & Clutches": "handbag,purse,clutch",
 };
 
 const TYPE_ICON: Record<string, string> = {
-  Topwear:    "checkroom",
-  Bottomwear: "straighten",
-  Footwear:   "ice_skating",
-  Accessory:  "watch",
+  Topwear:          "checkroom",
+  Bottomwear:       "straighten",
+  Footwear:         "ice_skating",
+  Accessory:        "watch",
+  Jewellery:        "diamond",
+  Watches:          "watch",
+  Sunglasses:       "eyeglasses",
+  Perfumes:         "local_florist",
+  "Bags & Clutches": "shopping_bag",
 };
 
 const PLATFORM_STYLE: Record<string, string> = {
-  Myntra: "text-[#E61A5C] bg-[#FFF0F4] border-[#FCD2DC]",
-  Ajio:   "text-stone-800 bg-stone-50 border-stone-200",
-  Meesho: "text-pink-600 bg-pink-50 border-pink-100",
+  myntra:   "text-[#E61A5C] bg-[#FFF0F4] border-[#FCD2DC]",
+  ajio:     "text-stone-800 bg-stone-50 border-stone-200",
+  meesho:   "text-pink-600 bg-pink-50 border-pink-100",
+  amazon:   "text-orange-700 bg-orange-50 border-orange-200",
+  flipkart: "text-blue-700 bg-blue-50 border-blue-200",
 };
 
 const PLATFORM_LABEL: Record<string, string> = {
-  Myntra: "PREMIUM STORE",
-  Ajio:   "EXCLUSIVE STORE",
-  Meesho: "TRENDING STORE",
+  myntra:   "PREMIUM STORE",
+  ajio:     "EXCLUSIVE STORE",
+  meesho:   "TRENDING STORE",
+  amazon:   "AMAZON INDIA",
+  flipkart: "FLIPKART",
 };
+
+/** Normalise any platform string to a known key */
+function normalisePlatform(raw: string): string {
+  const s = (raw || "").toLowerCase();
+  if (s.includes("myntra")) return "myntra";
+  if (s.includes("ajio")) return "ajio";
+  if (s.includes("meesho")) return "meesho";
+  if (s.includes("amazon")) return "amazon";
+  if (s.includes("flipkart")) return "flipkart";
+  return "myntra"; // safe fallback
+}
 
 function getItemImageUrl(item: SlayItem, seed: number): string {
   if (item.imageUrl && (item.imageUrl.startsWith("http") || item.imageUrl.startsWith("data:"))) {
@@ -96,7 +121,7 @@ export default function App() {
 
   // Track active outfit view when swiping in results
   React.useEffect(() => {
-    if (screen === "results" && outfits.length > 0) {
+    if (screen === "results" && outfits.length > 0 && outfits[activeIndex]) {
       trackOutfitCardView(outfits[activeIndex], activeIndex);
     }
   }, [activeIndex, screen, outfits]);
@@ -124,7 +149,10 @@ export default function App() {
 
   // ── API call
   const curateStartTimeRef = useRef<number>(0);
+  const isLoadingRef = useRef<boolean>(false); // guard against double-clicks
   const handleCurate = async () => {
+    if (isLoadingRef.current) return; // prevent duplicate requests
+    isLoadingRef.current = true;
     setScreen("curating");
     setErrorMessage(null);
     playBeep(520, "sine", 0.1);
@@ -192,6 +220,8 @@ export default function App() {
       setScreen("onboarding");
       // 🔥 Analytics: generation failed
       trackCurateError(msg, occasion, budget);
+    } finally {
+      isLoadingRef.current = false; // always release lock
     }
   };
 
@@ -483,13 +513,16 @@ export default function App() {
     trackShareSuccess("clipboard", outfit.lookName);
   };
 
-  /** DuckDuckGo !bang redirect — lands directly on the product search page */
+  /** Returns affiliate product URL, with platform search fallback */
   const getBuyLink = (item: SlayItem) => {
     if (item.productUrl && item.productUrl.startsWith("http")) return item.productUrl;
     const query = item.searchQuery || `${item.brand} ${item.name} ${item.type}`;
+    const p = normalisePlatform(item.platform);
     const domain =
-      item.platform === "Myntra" ? "myntra.com" :
-      item.platform === "Ajio"   ? "ajio.com"   : "meesho.com";
+      p === "ajio"     ? "ajio.com"      :
+      p === "meesho"   ? "meesho.com"    :
+      p === "amazon"   ? "amazon.in"     :
+      p === "flipkart" ? "flipkart.com"  : "myntra.com";
     return `https://duckduckgo.com/?q=!ducky+${encodeURIComponent(`site:${domain} ${query}`)}`;
   };
 

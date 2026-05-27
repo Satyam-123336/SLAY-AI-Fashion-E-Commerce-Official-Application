@@ -34,16 +34,16 @@ Every product link is automatically wrapped with **Cuelinks affiliate tracking**
 
 | Feature | Description |
 |---|---|
-| 🎨 **Personalized Curation** | Curates 3 complete looks based on your gender, age, occasion & budget |
-| 🛍️ **Real Products** | Fetches live products via Google Serper Shopping API |
-| ⭐ **Smart Filtering** | Surfaces only 4.0+ rated products, sorted by review count |
-| 💰 **Budget Enforcement** | Strictly enforces your max budget across Top + Bottom + Accessory |
-| 🔗 **Affiliate Links** | Every product URL is automatically converted to Cuelinks affiliate links |
-| 📱 **Mobile-First UI** | Stunning, responsive design with Framer Motion animations |
-| 🎵 **Ambient Music** | Background fashion vibe with mute/unmute control |
-| 💾 **Save Outfits** | Bookmark your favourite looks for later |
-| 📤 **Share Feature** | Share curated outfit links instantly |
-| 📊 **Analytics** | Full in-app event tracking |
+| **Personalized Curation** | Curates 3 complete looks based on your gender, age, occasion & budget |
+| **Real Products** | Fetches live products via Google Serper Shopping API |
+| **Smart Filtering** | Surfaces only 4.0+ rated products, sorted by review count |
+| **Budget Enforcement** | Strictly enforces your max budget across Top + Bottom + Accessory |
+| **Affiliate Links** | Every product URL is automatically converted to Cuelinks affiliate links |
+| **Mobile-First UI** | Stunning, responsive design with Framer Motion animations |
+| **Ambient Music** | Background fashion vibe with mute/unmute control |
+| **Save Outfits** | Bookmark your favourite looks for later |
+| **Share Feature** | Share curated outfit links instantly |
+| **Analytics** | Full in-app event tracking |
 
 ---
 

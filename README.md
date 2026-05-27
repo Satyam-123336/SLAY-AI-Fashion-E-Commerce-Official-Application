@@ -74,22 +74,22 @@ Every product link is automatically wrapped with **Cuelinks affiliate tracking**
 ## Tech Stack
 
 **Frontend**
-- ⚛️ React 19 + TypeScript
-- ⚡ Vite 6 (Build Tool)
-- 🎨 Vanilla CSS + Tailwind CSS 4
-- 🎞️ Framer Motion (Animations)
-- 🔷 Lucide React (Icons)
+- React 19 + TypeScript
+- Vite 6 (Build Tool)
+- Vanilla CSS + Tailwind CSS 4
+- Framer Motion (Animations)
+- Lucide React (Icons)
 
 **Backend**
-- 🦕 Deno (Supabase Edge Functions)
-- 🔥 Express.js (Local Development)
-- 🛒 Google Serper API (Shopping Search)
-- 🔗 Cuelinks API (Affiliate Monetisation)
+- Deno (Supabase Edge Functions)
+- Express.js (Local Development)
+- Google Serper API (Shopping Search)
+- Cuelinks API (Affiliate Monetisation)
 
 **Infrastructure**
-- 🟢 Supabase Edge Functions (Backend hosting)
-- 🔥 Firebase Hosting (Frontend hosting)
-- 🌐 Hostinger (Custom domain: `slayai.online`)
+- Supabase Edge Functions (Backend hosting)
+- Firebase Hosting (Frontend hosting)
+- Hostinger (Custom domain: `www.slayai.online`)
 
 ---
 

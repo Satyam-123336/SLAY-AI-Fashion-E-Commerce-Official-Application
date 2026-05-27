@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://slayai.online" target="_blank"><img src="https://img.shields.io/badge/Live%20App-slayai.online-blueviolet?style=for-the-badge&logo=google-chrome" /></a>
+  <a href="https://www.slayai.online" target="_blank"><img src="https://img.shields.io/badge/Live%20App-www.slayai.online-blueviolet?style=for-the-badge&logo=google-chrome" /></a>
   <img src="https://img.shields.io/badge/Backend-Supabase%20Edge%20Functions-3ECF8E?style=for-the-badge&logo=supabase" />
   <img src="https://img.shields.io/badge/Frontend-Firebase%20Hosting-FFCA28?style=for-the-badge&logo=firebase" />
   <img src="https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react" />

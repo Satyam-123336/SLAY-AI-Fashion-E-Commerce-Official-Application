@@ -17,12 +17,12 @@
 </p>
 
 <p align="center">
-  <img src="https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=900&h=350&fit=crop" alt="SLAY AI Banner" width="100%" style="border-radius:12px" />
+  <img src="https://i.etsystatic.com/23811226/r/il/f978ff/2657848335/il_794xN.2657848335_l1r7.jpg" alt="SLAY AI Banner" width="100%" style="border-radius:12px" />
 </p>
 
 ---
 
-## ✨ What is SLAY AI?
+## What is SLAY AI?
 
 **SLAY AI** is a smart, real-time fashion outfit curator that takes your personal preferences — gender, age, occasion, accessories, and budget — and instantly generates curated outfit recommendations with actual shoppable products from top Indian e-commerce platforms like Myntra, Ajio, Amazon India, and Flipkart.
 
@@ -30,7 +30,7 @@ Every product link is automatically wrapped with **Cuelinks affiliate tracking**
 
 ---
 
-## 🚀 Features
+## Features
 
 | Feature | Description |
 |---|---|
@@ -47,7 +47,7 @@ Every product link is automatically wrapped with **Cuelinks affiliate tracking**
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -71,7 +71,7 @@ Every product link is automatically wrapped with **Cuelinks affiliate tracking**
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 **Frontend**
 - ⚛️ React 19 + TypeScript
@@ -93,7 +93,7 @@ Every product link is automatically wrapped with **Cuelinks affiliate tracking**
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 slay-ai/
@@ -118,7 +118,7 @@ slay-ai/
 
 ---
 
-## ⚙️ Environment Variables
+## Environment Variables
 
 Create a `.env` file in the root directory for local development:
 
@@ -140,7 +140,7 @@ npx supabase secrets set SERPER_API_KEY=your_google_serper_api_key
 
 ---
 
-## 🏃 Running Locally
+## Running Locally
 
 **Prerequisites:** Node.js 20+, npm
 
@@ -163,7 +163,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
-## 🚀 Deployment
+## Deployment
 
 ### Backend → Supabase Edge Functions
 
@@ -196,7 +196,7 @@ npx firebase deploy --only hosting
 
 ---
 
-## 💸 Monetisation — Cuelinks Affiliate Integration
+## Monetisation — Cuelinks Affiliate Integration
 
 Every time a user clicks **"Buy"** on any product card, the URL is automatically converted into a **Cuelinks affiliate tracking link**. This means you earn a commission from Myntra, Ajio, Amazon India, Flipkart, and hundreds of other Indian retailers on every completed purchase — with zero extra effort.
 
@@ -216,7 +216,7 @@ async function wrapWithCuelinks(originalUrl: string): Promise<string> {
 
 ---
 
-## 🤝 API Integrations
+## API Integrations
 
 | API | Purpose | Docs |
 |---|---|---|
@@ -225,7 +225,7 @@ async function wrapWithCuelinks(originalUrl: string): Promise<string> {
 
 ---
 
-## 📜 License
+## License
 
 This project is proprietary software owned by **FlashFusion Labs Private Limited**.
 

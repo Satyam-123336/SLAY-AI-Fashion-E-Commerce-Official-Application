@@ -1,5 +1,5 @@
 <h1 align="center">
-  <img src="public/logo.svg" alt="SLAY AI Logo" width="60" />
+  <!--<img src="public/logo.svg" alt="SLAY AI Logo" width="60" /> -->
   <br />
   SLAY AI — Fashion Outfit Curator
 </h1>
